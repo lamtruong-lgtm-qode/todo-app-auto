@@ -1,0 +1,227 @@
+{
+  "schema_version": "1.1.0",
+  "run_id": "fleet-runnable",
+  "config": {
+    "base_url": "http://localhost:3000",
+    "parallelism": 1,
+    "video": "fail",
+    "default_timeout_ms": 15000
+  },
+  "namespace": {
+    "run_id": "fleet-runnable",
+    "email": "qa+fleet-runnable@example.com",
+    "tag": "QA RUN fleet-runnable"
+  },
+  "scenarios": [
+    {
+      "name": "Todo page loads and a todo added through the UI appears",
+      "tags": ["smoke", "happy-path"],
+      "setup": [],
+      "steps": [
+        {
+          "kind": "action",
+          "op": "navigate",
+          "intent": "open the todo page at the root route",
+          "url": "/"
+        },
+        {
+          "kind": "assert",
+          "op": "assert",
+          "intent": "precondition: the main heading is visible",
+          "expected": { "kind": "visible", "target": { "by": "role", "role": "heading", "name": "Todos" } }
+        },
+        {
+          "kind": "assert",
+          "op": "assert",
+          "intent": "precondition: the new-todo input is visible",
+          "expected": { "kind": "visible", "target": { "by": "placeholder", "name": "What needs to be done?" } }
+        },
+        {
+          "kind": "assert",
+          "op": "assert",
+          "intent": "precondition: the Add button is visible",
+          "expected": { "kind": "visible", "target": { "by": "role", "role": "button", "name": "Add" } }
+        },
+        {
+          "kind": "action",
+          "op": "fill",
+          "intent": "type a todo tagged with our run",
+          "target": { "by": "placeholder", "name": "What needs to be done?" },
+          "value": "QA todo {{run_id}}"
+        },
+        {
+          "kind": "action",
+          "op": "click",
+          "intent": "submit the new todo",
+          "target": { "by": "role", "role": "button", "name": "Add" }
+        },
+        {
+          "kind": "assert",
+          "op": "assert",
+          "intent": "the new todo text appears in the list",
+          "expected": { "kind": "text_present", "text": "QA todo {{run_id}}" }
+        },
+        {
+          "kind": "assert",
+          "op": "assert",
+          "intent": "the input was cleared after adding",
+          "expected": { "kind": "value_equals", "target": { "by": "placeholder", "name": "What needs to be done?" }, "value": "" }
+        }
+      ],
+      "teardown": [
+        {
+          "kind": "action",
+          "op": "api",
+          "intent": "list todos so our UI-created todo can be found and deleted",
+          "method": "GET",
+          "api_path": "/api/todos",
+          "capture": { "all_todos": "$" }
+        },
+        {
+          "kind": "action",
+          "op": "transform",
+          "intent": "find the id of the todo this scenario created",
+          "from_capture": "all_todos",
+          "expr": "[.[] | select(.title | test(\"^QA todo \")) | .id] | first | tostring",
+          "capture": { "ui_todo_id": "$" }
+        },
+        {
+          "kind": "action",
+          "op": "api",
+          "intent": "delete the todo this scenario created",
+          "method": "DELETE",
+          "api_path": "/api/todos/{{ui_todo_id}}",
+          "status": 204
+        }
+      ]
+    },
+    {
+      "name": "API lists todos as an array and returns the todo we create",
+      "tags": ["api", "backend-effect"],
+      "setup": [],
+      "steps": [
+        {
+          "kind": "action",
+          "op": "api",
+          "intent": "create a todo we own through the API",
+          "method": "POST",
+          "api_path": "/api/todos",
+          "body": { "title": "QA api {{run_id}}" },
+          "status": 201,
+          "capture": { "todo_id": "$.id", "todo_title": "$.title" }
+        },
+        {
+          "kind": "action",
+          "op": "api",
+          "intent": "read the todo list",
+          "method": "GET",
+          "api_path": "/api/todos",
+          "status": 200,
+          "capture": { "todos": "$" }
+        },
+        {
+          "kind": "action",
+          "op": "transform",
+          "intent": "classify the shape of the list response",
+          "from_capture": "todos",
+          "expr": "if type == \"array\" then \"array\" else \"other\" end",
+          "capture": { "list_shape": "$" }
+        },
+        {
+          "kind": "assert",
+          "op": "assert",
+          "intent": "the list endpoint returns a JSON array",
+          "expected": { "kind": "capture_equals", "capture_name": "list_shape", "value": "array" }
+        },
+        {
+          "kind": "action",
+          "op": "transform",
+          "intent": "count list entries matching our created todo by title",
+          "from_capture": "todos",
+          "expr": "[.[] | select(.title == $title)] | length | tostring",
+          "vars": { "title": "todo_title" },
+          "capture": { "owned_matches": "$" }
+        },
+        {
+          "kind": "assert",
+          "op": "assert",
+          "intent": "exactly one listed todo is the one we created (backend effect)",
+          "expected": { "kind": "capture_equals", "capture_name": "owned_matches", "value": "1" }
+        },
+        {
+          "kind": "action",
+          "op": "transform",
+          "intent": "read the shape of our todo's fields",
+          "from_capture": "todos",
+          "expr": "[.[] | select(.title == $title)] | first | [(.id | type), (.title | type), (.completed | type)] | join(\",\")",
+          "vars": { "title": "todo_title" },
+          "capture": { "todo_field_types": "$" }
+        },
+        {
+          "kind": "assert",
+          "op": "assert",
+          "intent": "a todo carries a numeric id, string title and boolean completed flag",
+          "expected": { "kind": "capture_equals", "capture_name": "todo_field_types", "value": "number,string,boolean" }
+        }
+      ],
+      "teardown": [
+        {
+          "kind": "action",
+          "op": "api",
+          "intent": "delete the todo we created",
+          "method": "DELETE",
+          "api_path": "/api/todos/{{todo_id}}",
+          "status": 204
+        }
+      ]
+    },
+    {
+      "name": "Submitting an empty todo adds nothing",
+      "tags": ["edge", "validation"],
+      "setup": [],
+      "steps": [
+        {
+          "kind": "action",
+          "op": "navigate",
+          "intent": "open the todo page",
+          "url": "/"
+        },
+        {
+          "kind": "assert",
+          "op": "assert",
+          "intent": "precondition: no todo of ours exists yet",
+          "expected": { "kind": "owned_count", "owned_tag": "{{run_id}}", "count": 0 }
+        },
+        {
+          "kind": "action",
+          "op": "fill",
+          "intent": "enter only whitespace into the new-todo input",
+          "target": { "by": "placeholder", "name": "What needs to be done?" },
+          "value": "   "
+        },
+        {
+          "kind": "action",
+          "op": "click",
+          "intent": "submit the empty todo",
+          "target": { "by": "role", "role": "button", "name": "Add" }
+        },
+        {
+          "kind": "assert",
+          "op": "assert",
+          "intent": "still no todo of ours exists after the empty submit",
+          "expected": { "kind": "owned_count", "owned_tag": "{{run_id}}", "count": 0 }
+        },
+        {
+          "kind": "action",
+          "op": "api",
+          "intent": "the API also rejects an empty title",
+          "method": "POST",
+          "api_path": "/api/todos",
+          "body": { "title": "" },
+          "status": 400
+        }
+      ],
+      "teardown": []
+    }
+  ]
+}
