@@ -31,3 +31,11 @@ npm test
 | DELETE | `/api/todos`                  | Clear completed todos    |
 
 Data is stored in memory and resets when the server restarts.
+
+## Run in Fleet / Docker
+
+The image is built from the `Dockerfile` at the repo root and runs as the non-root `node` user.
+
+- **Port:** the server listens on `PORT` (default `3000`); the image exposes `3000`.
+- **Data:** todos are kept in memory and reset whenever the container restarts.
+- **Replicas:** use `replicas: 1`. The store is per-process, so additional replicas would each hold different data.
